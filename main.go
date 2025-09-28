@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 )
 
 func main() {
@@ -14,6 +15,7 @@ func main() {
 	defer messages.Close()
 
 	byteslice := make([]byte, 8)
+	currentline := ""
 
 	for {
 		n, err := messages.Read(byteslice)
@@ -23,12 +25,25 @@ func main() {
 		}
 
 		if n > 0 {
-			fmt.Printf("read: %s\n", byteslice[:n])
+			chunk := string(byteslice[:n])
+			parts := strings.Split(chunk, "\n")
+
+			// print all complete lines
+			for i := 0; i < len(parts)-1; i++ {
+				fmt.Printf("read: %s\n", currentline+parts[i])
+				currentline = ""
+			}
+			// keep the trailing partial (possibly empty if chunk ended with \n)
+			currentline += parts[len(parts)-1]
 		}
 
 		if err == io.EOF {
+			if currentline != "" {
+				fmt.Printf("read: %s\n", currentline)
+			}
 			break
 		}
+
 	}
 
 }
