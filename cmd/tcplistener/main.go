@@ -2,47 +2,46 @@ package main
 
 import (
 	"fmt"
-	"io"
+	"httpfromtcp/internal/request"
 	"net"
-	"strings"
 )
 
-func getLinesChannel(f io.ReadCloser) <-chan string {
-	ch := make(chan string)
+// func getLinesChannel(f io.ReadCloser) <-chan string {
+// 	ch := make(chan string)
 
-	go func() {
-		defer close(ch)
-		defer f.Close()
+// 	go func() {
+// 		defer close(ch)
+// 		defer f.Close()
 
-		buf := make([]byte, 8)
-		var accum []byte
-		for {
-			n, err := f.Read(buf)
-			if n > 0 {
-				chunk := buf[:n]
-				accum = append(accum, chunk...)
-				parts := strings.Split(string(accum), "\n")
-				for i := 0; i < len(parts)-1; i++ {
-					ch <- parts[i]
-				}
-				accum = []byte(parts[len(parts)-1])
-			}
-			if err != nil {
-				if err == io.EOF {
-					if len(accum) > 0 {
-						ch <- string(accum)
-					}
-				} else {
-					// optional: log or ignore, but exit
-					fmt.Println("Error reading file:", err)
-				}
-				return
-			}
-		}
-	}()
+// 		buf := make([]byte, 8)
+// 		var accum []byte
+// 		for {
+// 			n, err := f.Read(buf)
+// 			if n > 0 {
+// 				chunk := buf[:n]
+// 				accum = append(accum, chunk...)
+// 				parts := strings.Split(string(accum), "\n")
+// 				for i := 0; i < len(parts)-1; i++ {
+// 					ch <- parts[i]
+// 				}
+// 				accum = []byte(parts[len(parts)-1])
+// 			}
+// 			if err != nil {
+// 				if err == io.EOF {
+// 					if len(accum) > 0 {
+// 						ch <- string(accum)
+// 					}
+// 				} else {
+// 					// optional: log or ignore, but exit
+// 					fmt.Println("Error reading file:", err)
+// 				}
+// 				return
+// 			}
+// 		}
+// 	}()
 
-	return ch
-}
+// 	return ch
+// }
 
 func main() {
 
@@ -64,9 +63,12 @@ func main() {
 
 		go func(c net.Conn) {
 			defer c.Close()
-			for line := range getLinesChannel(c) {
-				fmt.Println(line)
+			request, err := request.RequestFromReader(c)
+			if err != nil {
+				fmt.Println("Error reading request:", err)
+				return
 			}
+			fmt.Printf("Request line:\n- Method: %s\n- Target: %s\n- Version: %s\n", request.RequestLine.Method, request.RequestLine.RequestTarget, request.RequestLine.HttpVersion)
 			fmt.Println("connection closed")
 		}(conn)
 	}
