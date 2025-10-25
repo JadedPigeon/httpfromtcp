@@ -48,8 +48,19 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 	// Value: trim surrounding whitespace
 	value := strings.TrimSpace(valRaw)
 
-	// Add to headers map
-	h[keyRaw] = value
+	// Check for invalid characters in key by comparing them to the white list A-Z, a-z, 0-9, or one of !#$%&'*+-.^_|~`
+	for _, ch := range keyRaw {
+		if !((ch >= 'A' && ch <= 'Z') ||
+			(ch >= 'a' && ch <= 'z') ||
+			(ch >= '0' && ch <= '9') ||
+			strings.ContainsRune("!#$%&'*+-.^_|~`", ch)) {
+			return 0, false, fmt.Errorf("invalid character %q in header key: %q", ch, keyRaw)
+		}
+	}
+
+	// Normalize header name to lowercase for case-insensitive lookup and add to map
+	key := strings.ToLower(keyRaw)
+	h[key] = value
 
 	// consumed is header line plus CRLF
 	consumed := idx + 2

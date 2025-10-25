@@ -14,7 +14,7 @@ func TestHeaders(t *testing.T) {
 	n, done, err := headers.Parse(data)
 	require.NoError(t, err)
 	require.NotNil(t, headers)
-	assert.Equal(t, "localhost:42069", headers["Host"])
+	assert.Equal(t, "localhost:42069", headers["host"])
 	assert.Equal(t, 23, n)
 	assert.False(t, done)
 
@@ -31,19 +31,19 @@ func TestHeaders(t *testing.T) {
 	data = []byte("Host:    localhost:42069    \r\n\r\n")
 	n, done, err = headers.Parse(data)
 	require.NoError(t, err)
-	assert.Equal(t, "localhost:42069", headers["Host"])
+	assert.Equal(t, "localhost:42069", headers["host"])
 	// consumed should be the header line length + CRLF (idx + 2)
 	assert.Equal(t, len("Host:    localhost:42069    \r\n"), n)
 	assert.False(t, done)
 
 	// Test: Valid 2 headers with existing headers
 	headers = NewHeaders()
-	headers["Existing"] = "present"
+	headers["existing"] = "present"
 	data = []byte("Host: localhost:42069\r\n")
 	n, done, err = headers.Parse(data)
 	require.NoError(t, err)
-	assert.Equal(t, "localhost:42069", headers["Host"])
-	assert.Equal(t, "present", headers["Existing"])
+	assert.Equal(t, "localhost:42069", headers["host"])
+	assert.Equal(t, "present", headers["existing"])
 	assert.Equal(t, len(data), n)
 	assert.False(t, done)
 
@@ -51,7 +51,7 @@ func TestHeaders(t *testing.T) {
 	data2 := []byte("User-Agent: curl/7.81.0\r\n\r\n")
 	n2, done2, err := headers.Parse(data2)
 	require.NoError(t, err)
-	assert.Equal(t, "curl/7.81.0", headers["User-Agent"])
+	assert.Equal(t, "curl/7.81.0", headers["user-agent"])
 	assert.False(t, done2)
 	assert.Equal(t, len("User-Agent: curl/7.81.0\r\n"), n2)
 
@@ -62,4 +62,21 @@ func TestHeaders(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, done)
 	assert.Equal(t, 2, n)
+
+	// Test: Case insensitivity - keys should be stored lowercase
+	headers = NewHeaders()
+	data = []byte("HoSt: example.com\r\n\r\n")
+	n, done, err = headers.Parse(data)
+	require.NoError(t, err)
+	assert.Equal(t, "example.com", headers["host"])
+	assert.False(t, done)
+	assert.Equal(t, 19, n)
+
+	// Test: Invalid characters should return an error
+	headers = NewHeaders()
+	data = []byte("H©st: localhost:42069\r\n\r\n")
+	n, done, err = headers.Parse(data)
+	require.Error(t, err)
+	assert.Equal(t, 0, n)
+	assert.False(t, done)
 }
