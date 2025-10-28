@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"httpfromtcp/internal/headers"
 )
 
 type Request struct {
 	RequestLine RequestLine
 	// State tracks the parser state for this request.
-	state ParserState
+	state   ParserState
+	Headers headers.Headers
 }
 
 type RequestLine struct {
@@ -26,6 +29,8 @@ type ParserState int
 const (
 	// ParserInitialized indicates parsing has started but not completed.
 	ParserInitialized ParserState = iota
+	// requestStateParsingHeaders indicates the parser is currently parsing headers.
+	requestStateParsingHeaders
 	// ParserDone indicates the request has been fully parsed.
 	ParserDone
 )
@@ -125,24 +130,49 @@ func (r *Request) parse(data []byte) (int, error) {
 	}
 
 	// Convert incoming bytes to string for existing helpers.
-	// Use the byte-based parser which validates and returns a RequestLine.
-	rl, consumed, err := parseRequestLine(data)
-	if err != nil {
-		return consumed, err
-	}
-	if consumed == 0 {
-		// Need more data
-		return 0, nil
-	}
+	switch r.state {
+	case ParserInitialized:
+		// Use the byte-based parser which validates and returns a RequestLine.
+		rl, consumed, err := parseRequestLine(data)
+		if err != nil {
+			return consumed, err
+		}
+		if consumed == 0 {
+			// Need more data
+			return 0, nil
+		}
 
-	// Populate the Request and update state
-	r.RequestLine = *rl
-	r.state = ParserDone
+		// Populate the Request, initialize headers, and move to header parsing state
+		r.RequestLine = *rl
+		r.Headers = headers.NewHeaders()
+		r.state = requestStateParsingHeaders
 
-	return consumed, nil
+		return consumed, nil
+
+	case requestStateParsingHeaders:
+		if r.Headers == nil {
+			r.Headers = headers.NewHeaders()
+		}
+		n, done, err := r.Headers.Parse(data)
+		if err != nil {
+			return 0, err
+		}
+		if n == 0 && !done {
+			// need more data
+			return 0, nil
+		}
+		if done {
+			r.state = ParserDone
+			return n, nil
+		}
+		// consumed a header line, remain in headers state
+		return n, nil
+
+	default:
+		return 0, fmt.Errorf("unknown parser state: %d", r.state)
+	}
 }
 
-// Just returning first line for now
 // parseRequestLine returns the request line (without CRLF), the number of
 // bytes consumed from the input (including the terminating "\r\n"), and an
 // error. If the input does not yet contain a CRLF, it returns consumed=0 and

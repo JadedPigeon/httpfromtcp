@@ -60,7 +60,12 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 
 	// Normalize header name to lowercase for case-insensitive lookup and add to map
 	key := strings.ToLower(keyRaw)
-	h[key] = value
+	if prev, ok := h[key]; ok && prev != "" {
+		// combine duplicate header values with a comma and space
+		h[key] = prev + ", " + value
+	} else {
+		h[key] = value
+	}
 
 	// consumed is header line plus CRLF
 	consumed := idx + 2
