@@ -171,4 +171,74 @@ func TestParseHeaders(t *testing.T) {
 	})
 }
 
-// To do list:
+func TestParseBody(t *testing.T) {
+	t.Run("Standard Body", func(t *testing.T) {
+		reader := &chunkReader{
+			data: "POST /submit HTTP/1.1\r\n" +
+				"Host: localhost:42069\r\n" +
+				"Content-Length: 13\r\n" +
+				"\r\n" +
+				"hello world!\n",
+			numBytesPerRead: 3,
+		}
+		r, err := RequestFromReader(reader)
+		require.NoError(t, err)
+		require.NotNil(t, r)
+		assert.Equal(t, "hello world!\n", string(r.Body))
+	})
+
+	t.Run("Empty Body, 0 reported content length", func(t *testing.T) {
+		reader := &chunkReader{
+			data: "POST /submit HTTP/1.1\r\n" +
+				"Host: localhost:42069\r\n" +
+				"Content-Length: 0\r\n" +
+				"\r\n",
+			numBytesPerRead: 3,
+		}
+		r, err := RequestFromReader(reader)
+		require.NoError(t, err)
+		require.NotNil(t, r)
+		assert.Nil(t, r.Body) // Body should be nil for empty body
+	})
+
+	t.Run("Empty Body, no reported content length", func(t *testing.T) {
+		reader := &chunkReader{
+			data: "GET /submit HTTP/1.1\r\n" +
+				"Host: localhost:42069\r\n" +
+				"\r\n",
+			numBytesPerRead: 3,
+		}
+		r, err := RequestFromReader(reader)
+		require.NoError(t, err)
+		require.NotNil(t, r)
+		assert.Nil(t, r.Body) // Body should be nil when no content length specified
+	})
+
+	t.Run("Body shorter than reported content length", func(t *testing.T) {
+		reader := &chunkReader{
+			data: "POST /submit HTTP/1.1\r\n" +
+				"Host: localhost:42069\r\n" +
+				"Content-Length: 20\r\n" +
+				"\r\n" +
+				"partial content",
+			numBytesPerRead: 3,
+		}
+		_, err := RequestFromReader(reader)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "incomplete request after EOF")
+	})
+
+	t.Run("No Content-Length but Body Exists", func(t *testing.T) {
+		reader := &chunkReader{
+			data: "POST /submit HTTP/1.1\r\n" +
+				"Host: localhost:42069\r\n" +
+				"\r\n" +
+				"surprise body!",
+			numBytesPerRead: 3,
+		}
+		r, err := RequestFromReader(reader)
+		require.NoError(t, err)
+		require.NotNil(t, r)
+		assert.Nil(t, r.Body) // If no Content-Length, we ignore any body data
+	})
+}

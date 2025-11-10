@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"httpfromtcp/internal/headers"
@@ -14,6 +15,7 @@ type Request struct {
 	// State tracks the parser state for this request.
 	state   ParserState
 	Headers headers.Headers
+	Body    []byte
 }
 
 type RequestLine struct {
@@ -31,6 +33,8 @@ const (
 	ParserInitialized ParserState = iota
 	// requestStateParsingHeaders indicates the parser is currently parsing headers.
 	requestStateParsingHeaders
+	// requestStateParsingBody indicates the parser is currently parsing the body.
+	requestStateParsingBody
 	// ParserDone indicates the request has been fully parsed.
 	ParserDone
 )
@@ -41,8 +45,6 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 
 	buf := make([]byte, 8)
 	readTo := 0 // number of valid bytes in buf
-
-	var totalRead int
 	for {
 		// If parser already completed (could happen if previous chunk finished), break.
 		if req.state == ParserDone {
@@ -81,7 +83,6 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 
 		n, err := reader.Read(buf[readTo:])
 		if n > 0 {
-			totalRead += n
 			readTo += n
 		}
 		if err != nil {
@@ -103,8 +104,6 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 				if req.state == ParserDone {
 					// Silence potential staticcheck unused-value warnings for bookkeeping vars
 					_ = readTo
-					_ = totalRead
-
 					return req, nil
 				}
 				return nil, fmt.Errorf("incomplete request after EOF: need more data")
@@ -124,12 +123,6 @@ func (r *Request) parse(data []byte) (int, error) {
 		return 0, fmt.Errorf("nil Request")
 	}
 
-	// If already done, this is an error: caller shouldn't feed more data.
-	if r.state == ParserDone {
-		return 0, fmt.Errorf("trying to read data in a done state")
-	}
-
-	// Convert incoming bytes to string for existing helpers.
 	switch r.state {
 	case ParserInitialized:
 		// Use the byte-based parser which validates and returns a RequestLine.
@@ -162,21 +155,75 @@ func (r *Request) parse(data []byte) (int, error) {
 			return 0, nil
 		}
 		if done {
-			r.state = ParserDone
+			r.state = requestStateParsingBody
 			return n, nil
 		}
 		// consumed a header line, remain in headers state
 		return n, nil
+
+	case requestStateParsingBody:
+
+		// Check for Content-Length header
+		headerVal := r.Headers.Get("Content-Length")
+		if headerVal == "" {
+			// No body expected: mark done and consume any provided bytes so the
+			// caller can make forward progress rather than looping on 0-consume.
+			r.state = ParserDone
+			if len(data) == 0 {
+				return 0, nil
+			}
+			return len(data), nil
+		}
+
+		// Convert Content-Length to integer using strconv for clearer errors.
+		contentLength, err := strconv.Atoi(headerVal)
+		if err != nil {
+			return 0, fmt.Errorf("invalid Content-Length: %q", headerVal)
+		}
+
+		// Special case: if content length is 0, transition to done and consume
+		// any provided data so the caller can discard extra bytes and make
+		// forward progress.
+		if contentLength == 0 {
+			r.state = ParserDone
+			if len(data) == 0 {
+				return 0, nil
+			}
+			return len(data), nil
+		}
+
+		// Initialize body if needed
+		if r.Body == nil {
+			r.Body = make([]byte, 0, contentLength)
+		}
+
+		// Append available data to body
+		bytesToCopy := len(data)
+		if bytesToCopy > 0 {
+			r.Body = append(r.Body, data...)
+		}
+
+		// Check if body exceeds content length
+		if len(r.Body) > contentLength {
+			return 0, fmt.Errorf("body length %d exceeds Content-Length %d", len(r.Body), contentLength)
+		}
+
+		// If we've reached the expected length, transition to done
+		if len(r.Body) == contentLength {
+			r.state = ParserDone
+		}
+
+		return bytesToCopy, nil
+
+	case ParserDone:
+		// Already done with this request, consume no bytes
+		return 0, nil
 
 	default:
 		return 0, fmt.Errorf("unknown parser state: %d", r.state)
 	}
 }
 
-// parseRequestLine returns the request line (without CRLF), the number of
-// bytes consumed from the input (including the terminating "\r\n"), and an
-// error. If the input does not yet contain a CRLF, it returns consumed=0 and
-// nil error to indicate the caller needs to provide more data.
 // parseRequestLine examines the provided bytes for a CRLF-terminated
 // request-line. If a full line is found it parses and validates the
 // request-line and returns a populated RequestLine and the number of bytes
