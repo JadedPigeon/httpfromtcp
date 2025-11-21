@@ -5,6 +5,8 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+
+	"httpfromtcp/internal/response"
 )
 
 // Contains the state of the server
@@ -60,14 +62,25 @@ func (s *Server) listen() {
 	}
 }
 
-// Handles a single connection by writing a simple HTTP response and then closing the connection.
+// Update this function to return our "default" response
+// HTTP/1.1 200 OK
+// Content-Length: 0
+// Connection: close
+// Content-Type: text/plain
 func (s *Server) handle(conn net.Conn) {
 	defer s.wg.Done()
 	defer conn.Close()
 
 	// Simple fixed response body
-	body := "Hello World!"
-	resp := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", len(body), body)
-	// Best-effort write; ignore errors as connection will be closed regardless
-	_, _ = conn.Write([]byte(resp))
+	body := ""
+
+	// Write status line
+	_ = response.WriteStatusLine(conn, response.StatusOk)
+
+	// Default headers and write them
+	hdrs := response.GetDefaultHeaders(len(body))
+	_ = response.WriteHeaders(conn, hdrs)
+
+	// Write body
+	_, _ = conn.Write([]byte(body))
 }
