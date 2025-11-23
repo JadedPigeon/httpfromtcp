@@ -13,6 +13,7 @@ const (
 	StatusOk                  StatusCode = 200
 	StatusBadRequest          StatusCode = 400
 	StatusInternalServerError StatusCode = 500
+	StatusRequestTimeout      StatusCode = 408
 )
 
 func WriteStatusLine(w io.Writer, statusCode StatusCode) error {
@@ -24,6 +25,8 @@ func WriteStatusLine(w io.Writer, statusCode StatusCode) error {
 		reason = "Bad Request"
 	case StatusInternalServerError:
 		reason = "Internal Server Error"
+	case StatusRequestTimeout:
+		reason = "Request Timeout"
 	default:
 		reason = ""
 	}

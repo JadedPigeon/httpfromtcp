@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log"
 	"strconv"
 	"strings"
 
@@ -69,6 +70,12 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 			continue
 		}
 
+		// If parser reached done state while consuming no bytes, break out
+		// now instead of attempting another Read which may block.
+		if req.state == ParserDone {
+			break
+		}
+
 		// Need more data: ensure buffer has space and read directly into it.
 		if readTo == len(buf) {
 			// grow buffer
@@ -82,6 +89,7 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 		}
 
 		n, err := reader.Read(buf[readTo:])
+		log.Printf("RequestFromReader: read returned n=%d err=%v", n, err)
 		if n > 0 {
 			readTo += n
 		}
@@ -169,9 +177,6 @@ func (r *Request) parse(data []byte) (int, error) {
 			// No body expected: mark done and consume any provided bytes so the
 			// caller can make forward progress rather than looping on 0-consume.
 			r.state = ParserDone
-			if len(data) == 0 {
-				return 0, nil
-			}
 			return len(data), nil
 		}
 
@@ -186,9 +191,6 @@ func (r *Request) parse(data []byte) (int, error) {
 		// forward progress.
 		if contentLength == 0 {
 			r.state = ParserDone
-			if len(data) == 0 {
-				return 0, nil
-			}
 			return len(data), nil
 		}
 

@@ -1,11 +1,16 @@
 package server
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+	"log"
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	"httpfromtcp/internal/request"
 	"httpfromtcp/internal/response"
 )
 
@@ -14,16 +19,17 @@ type Server struct {
 	listener net.Listener
 	closed   atomic.Bool
 	wg       sync.WaitGroup
+	handler  Handler
 }
 
 // Creates a net.Listener and returns a new Server instance. Starts listening for requests inside a goroutine.
-func Serve(port int) (*Server, error) {
+func Serve(port int, handler Handler) (*Server, error) {
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return nil, err
 	}
 
-	s := &Server{listener: ln}
+	s := &Server{listener: ln, handler: handler}
 	s.closed.Store(false)
 	go s.listen()
 	return s, nil
@@ -62,27 +68,87 @@ func (s *Server) listen() {
 	}
 }
 
-// Update this function to return our "default" response
-// HTTP/1.1 200 OK
-// Content-Length: 0
-// Connection: close
-// Content-Type: text/plain
 func (s *Server) handle(conn net.Conn) {
 	defer s.wg.Done()
 	defer conn.Close()
+	log.Println("handle: new connection")
 
-	// Simple fixed response body
-	body := ""
+	// Add a read deadline so a client that stops sending can't hang the server
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	// Parse the request from the connection
+	req, err := request.RequestFromReader(conn)
+	log.Printf("handle: RequestFromReader returned, err=%v\n", err)
+	if err != nil {
+		// If it was a timeout, return a clearer message and log
+		if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			log.Printf("handle: read timeout from %s: %v", conn.RemoteAddr(), err)
+			he := HandlerError{StatusCode: response.StatusBadRequest, Message: "request read timeout\n"}
+			he.Write(conn)
+			return
+		}
+		he := HandlerError{StatusCode: response.StatusBadRequest, Message: err.Error()}
+		he.Write(conn)
+		log.Println("handle: wrote bad request error")
+		return
+	}
+	// Clear the read deadline now that we've successfully read the request
+	_ = conn.SetReadDeadline(time.Time{})
+	log.Printf("handle: parsed request line: method=%s target=%s version=%s\n",
+		req.RequestLine.Method,
+		req.RequestLine.RequestTarget,
+		req.RequestLine.HttpVersion,
+	)
 
-	// Write status line
+	// Prepare a buffer for the handler to write its response body
+	buf := &bytes.Buffer{}
+	log.Println("handle: calling handler")
+
+	// Call the handler
+	if s.handler == nil {
+		// No handler provided: internal server error
+		he := HandlerError{StatusCode: response.StatusInternalServerError, Message: "no handler"}
+		he.Write(conn)
+		return
+	}
+
+	herr := s.handler(buf, req)
+	log.Printf("handle: handler returned, herr=%v\n", herr)
+
+	if herr != nil {
+		// Handler reported an error; write it to the connection
+		herr.Write(conn)
+		log.Println("handle: wrote handler error")
+		return
+	}
+
+	// Handler succeeded: build default headers, write status line, headers, and body
+	hdrs := response.GetDefaultHeaders(buf.Len())
 	_ = response.WriteStatusLine(conn, response.StatusOk)
-
-	// Default headers and write them
-	hdrs := response.GetDefaultHeaders(len(body))
 	_ = response.WriteHeaders(conn, hdrs)
-
-	// Write body
-	_, _ = conn.Write([]byte(body))
+	if buf.Len() > 0 {
+		_, _ = io.Copy(conn, buf)
+	}
 }
 
-// boot
+type HandlerError struct {
+	StatusCode response.StatusCode
+	Message    string
+}
+
+type Handler func(w io.Writer, req *request.Request) *HandlerError
+
+func (he HandlerError) Write(w io.Writer) {
+	// 1) write status line
+	_ = response.WriteStatusLine(w, he.StatusCode)
+
+	// 2) build headers using len(he.Message)
+	hdrs := response.GetDefaultHeaders(len(he.Message))
+
+	// 3) write headers
+	_ = response.WriteHeaders(w, hdrs)
+
+	// 4) write body (he.Message)
+	if len(he.Message) > 0 {
+		_, _ = io.WriteString(w, he.Message)
+	}
+}
