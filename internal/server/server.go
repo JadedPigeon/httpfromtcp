@@ -84,3 +84,5 @@ func (s *Server) handle(conn net.Conn) {
 	// Write body
 	_, _ = conn.Write([]byte(body))
 }
+
+// boot
