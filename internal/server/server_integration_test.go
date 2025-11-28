@@ -80,16 +80,27 @@ func doRequest(t *testing.T, addr string, path string) (int, string, error) {
 }
 
 func TestServerIntegration(t *testing.T) {
-	handler := func(w io.Writer, req *request.Request) *HandlerError {
+	handler := func(w *response.Writer, req *request.Request) {
 		target := req.RequestLine.RequestTarget
 		switch target {
 		case "/yourproblem":
-			return &HandlerError{StatusCode: response.StatusBadRequest, Message: "Your problem is not my problem\n"}
+			body := []byte("Your problem is not my problem\n")
+			_ = w.WriteStatusLine(response.StatusBadRequest)
+			_ = w.WriteHeaders(response.GetDefaultHeaders(len(body)))
+			_, _ = w.WriteBody(body)
+			return
 		case "/myproblem":
-			return &HandlerError{StatusCode: response.StatusInternalServerError, Message: "Woopsie, my bad\n"}
+			body := []byte("Woopsie, my bad\n")
+			_ = w.WriteStatusLine(response.StatusInternalServerError)
+			_ = w.WriteHeaders(response.GetDefaultHeaders(len(body)))
+			_, _ = w.WriteBody(body)
+			return
 		default:
-			_, _ = io.WriteString(w, "All good, frfr\n")
-			return nil
+			body := []byte("All good, frfr\n")
+			_ = w.WriteStatusLine(response.StatusOk)
+			_ = w.WriteHeaders(response.GetDefaultHeaders(len(body)))
+			_, _ = w.WriteBody(body)
+			return
 		}
 	}
 

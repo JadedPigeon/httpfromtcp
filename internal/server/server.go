@@ -1,9 +1,7 @@
 package server
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"sync"
@@ -72,6 +70,7 @@ func (s *Server) handle(conn net.Conn) {
 	defer s.wg.Done()
 	defer conn.Close()
 	log.Println("handle: new connection")
+	w := response.NewWriter(conn)
 
 	// Add a read deadline so a client that stops sending can't hang the server
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
@@ -79,16 +78,10 @@ func (s *Server) handle(conn net.Conn) {
 	req, err := request.RequestFromReader(conn)
 	log.Printf("handle: RequestFromReader returned, err=%v\n", err)
 	if err != nil {
-		// If it was a timeout, return a clearer message and log
-		if ne, ok := err.(net.Error); ok && ne.Timeout() {
-			log.Printf("handle: read timeout from %s: %v", conn.RemoteAddr(), err)
-			he := HandlerError{StatusCode: response.StatusBadRequest, Message: "request read timeout\n"}
-			he.Write(conn)
-			return
-		}
-		he := HandlerError{StatusCode: response.StatusBadRequest, Message: err.Error()}
-		he.Write(conn)
-		log.Println("handle: wrote bad request error")
+		w.WriteStatusLine(response.StatusBadRequest)
+		body := []byte(err.Error())
+		w.WriteHeaders(response.GetDefaultHeaders(len(body)))
+		w.WriteBody(body)
 		return
 	}
 	// Clear the read deadline now that we've successfully read the request
@@ -99,56 +92,18 @@ func (s *Server) handle(conn net.Conn) {
 		req.RequestLine.HttpVersion,
 	)
 
-	// Prepare a buffer for the handler to write its response body
-	buf := &bytes.Buffer{}
 	log.Println("handle: calling handler")
 
 	// Call the handler
 	if s.handler == nil {
-		// No handler provided: internal server error
-		he := HandlerError{StatusCode: response.StatusInternalServerError, Message: "no handler"}
-		he.Write(conn)
+		w.WriteStatusLine(response.StatusInternalServerError)
+		body := []byte("no handler")
+		w.WriteHeaders(response.GetDefaultHeaders(len(body)))
+		w.WriteBody(body)
 		return
 	}
 
-	herr := s.handler(buf, req)
-	log.Printf("handle: handler returned, herr=%v\n", herr)
-
-	if herr != nil {
-		// Handler reported an error; write it to the connection
-		herr.Write(conn)
-		log.Println("handle: wrote handler error")
-		return
-	}
-
-	// Handler succeeded: build default headers, write status line, headers, and body
-	hdrs := response.GetDefaultHeaders(buf.Len())
-	_ = response.WriteStatusLine(conn, response.StatusOk)
-	_ = response.WriteHeaders(conn, hdrs)
-	if buf.Len() > 0 {
-		_, _ = io.Copy(conn, buf)
-	}
+	s.handler(w, req)
 }
 
-type HandlerError struct {
-	StatusCode response.StatusCode
-	Message    string
-}
-
-type Handler func(w io.Writer, req *request.Request) *HandlerError
-
-func (he HandlerError) Write(w io.Writer) {
-	// 1) write status line
-	_ = response.WriteStatusLine(w, he.StatusCode)
-
-	// 2) build headers using len(he.Message)
-	hdrs := response.GetDefaultHeaders(len(he.Message))
-
-	// 3) write headers
-	_ = response.WriteHeaders(w, hdrs)
-
-	// 4) write body (he.Message)
-	if len(he.Message) > 0 {
-		_, _ = io.WriteString(w, he.Message)
-	}
-}
+type Handler func(w *response.Writer, req *request.Request)

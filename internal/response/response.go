@@ -16,7 +16,11 @@ const (
 	StatusRequestTimeout      StatusCode = 408
 )
 
-func WriteStatusLine(w io.Writer, statusCode StatusCode) error {
+type Writer struct {
+	dest io.Writer
+}
+
+func (w *Writer) WriteStatusLine(statusCode StatusCode) error {
 	var reason string
 	switch statusCode {
 	case StatusOk:
@@ -34,9 +38,9 @@ func WriteStatusLine(w io.Writer, statusCode StatusCode) error {
 	var n int
 	var err error
 	if reason == "" {
-		n, err = fmt.Fprintf(w, "HTTP/1.1 %d \r\n", statusCode)
+		n, err = fmt.Fprintf(w.dest, "HTTP/1.1 %d \r\n", statusCode)
 	} else {
-		n, err = fmt.Fprintf(w, "HTTP/1.1 %d %s\r\n", statusCode, reason)
+		n, err = fmt.Fprintf(w.dest, "HTTP/1.1 %d %s\r\n", statusCode, reason)
 	}
 	if err != nil {
 		return err
@@ -55,9 +59,9 @@ func GetDefaultHeaders(contentLen int) headers.Headers {
 	return h
 }
 
-func WriteHeaders(w io.Writer, headers headers.Headers) error {
-	for key, value := range headers {
-		n, err := fmt.Fprintf(w, "%s: %s\r\n", key, value)
+func (w *Writer) WriteHeaders(h headers.Headers) error {
+	for key, value := range h {
+		n, err := fmt.Fprintf(w.dest, "%s: %s\r\n", key, value)
 		if err != nil {
 			return err
 		}
@@ -66,7 +70,7 @@ func WriteHeaders(w io.Writer, headers headers.Headers) error {
 		}
 	}
 	// Write final CRLF to end headers section
-	n, err := fmt.Fprintf(w, "\r\n")
+	n, err := fmt.Fprintf(w.dest, "\r\n")
 	if err != nil {
 		return err
 	}
@@ -74,4 +78,12 @@ func WriteHeaders(w io.Writer, headers headers.Headers) error {
 		return fmt.Errorf("no bytes written for final CRLF after headers")
 	}
 	return nil
+}
+
+func (w *Writer) WriteBody(p []byte) (int, error) {
+	return w.dest.Write(p)
+}
+
+func NewWriter(dest io.Writer) *Writer {
+	return &Writer{dest: dest}
 }

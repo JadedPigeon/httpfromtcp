@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -15,17 +14,55 @@ import (
 const port = 42069
 
 func main() {
-	handler := func(w io.Writer, req *request.Request) *server.HandlerError {
+	handler := func(w *response.Writer, req *request.Request) {
 		target := req.RequestLine.RequestTarget
+
+		var status response.StatusCode
+		var html string
+
 		switch target {
 		case "/yourproblem":
-			return &server.HandlerError{StatusCode: response.StatusBadRequest, Message: "Your problem is not my problem\n"}
+			status = response.StatusBadRequest
+			html = `<html>
+	<head>
+		<title>400 Bad Request</title>
+	</head>
+	<body>
+		<h1>Bad Request</h1>
+		<p>Your request honestly kinda sucked.</p>
+	</body>
+	</html>`
 		case "/myproblem":
-			return &server.HandlerError{StatusCode: response.StatusInternalServerError, Message: "Woopsie, my bad\n"}
+			status = response.StatusInternalServerError
+			html = `<html>
+	<head>
+		<title>500 Internal Server Error</title>
+	</head>
+	<body>
+		<h1>Internal Server Error</h1>
+		<p>Okay, you know what? This one is on me.</p>
+	</body>
+	</html>`
 		default:
-			_, _ = io.WriteString(w, "All good, frfr\n")
-			return nil
+			status = response.StatusOk
+			html = `<html>
+	<head>
+		<title>200 OK</title>
+	</head>
+	<body>
+		<h1>Success!</h1>
+		<p>Your request was an absolute banger.</p>
+	</body>
+	</html>`
 		}
+
+		body := []byte(html)
+		headers := response.GetDefaultHeaders(len(body))
+		headers["content-type"] = "text/html"
+
+		w.WriteStatusLine(status)
+		w.WriteHeaders(headers)
+		w.WriteBody(body)
 	}
 
 	srv, err := server.Serve(port, handler)
