@@ -133,3 +133,24 @@ func (w *Writer) WriteChunkedBodyDone() (int, error) {
 	}
 	return 0, nil
 }
+
+func (w *Writer) WriteTrailers(h headers.Headers) error {
+	for key, value := range h {
+		n, err := fmt.Fprintf(w.dest, "%s: %s\r\n", key, value)
+		if err != nil {
+			return err
+		}
+		if n <= 0 {
+			return fmt.Errorf("no bytes written for header %q", key)
+		}
+	}
+	// Write final CRLF to end headers section
+	n, err := fmt.Fprintf(w.dest, "\r\n")
+	if err != nil {
+		return err
+	}
+	if n <= 0 {
+		return fmt.Errorf("no bytes written for final CRLF after headers")
+	}
+	return nil
+}

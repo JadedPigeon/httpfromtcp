@@ -1,14 +1,18 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
+	"httpfromtcp/internal/headers"
 	"httpfromtcp/internal/request"
 	"httpfromtcp/internal/response"
 	"httpfromtcp/internal/server"
@@ -110,22 +114,25 @@ func handleHTTPBin(w *response.Writer, req *request.Request) {
 	w.WriteStatusLine(response.StatusOk)
 
 	// start from default, but we won't use Content-Length
-	headers := response.GetDefaultHeaders(0)
-	delete(headers, "content-length")
-	headers["transfer-encoding"] = "chunked"
-	headers["content-type"] = "application/json"
+	respHeaders := response.GetDefaultHeaders(0)
+	delete(respHeaders, "content-length")
+	respHeaders["transfer-encoding"] = "chunked"
+	respHeaders["content-type"] = "application/json"
+	respHeaders["trailer"] = "X-Content-SHA256, X-Content-Length"
 
-	w.WriteHeaders(headers)
+	w.WriteHeaders(respHeaders)
 
 	buf := make([]byte, 1024)
+	var fullBody []byte
 
 	for {
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
-			// send that chunk
-			_, writeErr := w.WriteChunkedBody(buf[:n])
+			chunk := buf[:n]
+			fullBody = append(fullBody, chunk...)
+
+			_, writeErr := w.WriteChunkedBody(chunk)
 			if writeErr != nil {
-				// maybe log and break/return
 				return
 			}
 		}
@@ -140,6 +147,16 @@ func handleHTTPBin(w *response.Writer, req *request.Request) {
 		}
 	}
 
-	// send final 0-length chunk
+	sum := sha256.Sum256(fullBody)
+	hashHex := hex.EncodeToString(sum[:])
+	contentLen := len(fullBody)
+
+	trailers := headers.NewHeaders()
+	trailers["X-Content-SHA256"] = hashHex
+	trailers["X-Content-Length"] = strconv.Itoa(contentLen)
+
+	log.Println("writing trailers:", hashHex, contentLen)
+
 	w.WriteChunkedBodyDone()
+	w.WriteTrailers(trailers)
 }
