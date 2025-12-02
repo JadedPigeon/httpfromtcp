@@ -124,7 +124,7 @@ func (w *Writer) WriteChunkedBody(p []byte) (int, error) {
 
 func (w *Writer) WriteChunkedBodyDone() (int, error) {
 	// Final zero-length chunk indicates end of chunked body
-	n, err := fmt.Fprintf(w.dest, "0\r\n\r\n")
+	n, err := fmt.Fprintf(w.dest, "0\r\n")
 	if err != nil {
 		return 0, err
 	}
