@@ -54,6 +54,9 @@ func main() {
 		<p>Okay, you know what? This one is on me.</p>
 	</body>
 	</html>`
+			case "/video":
+				handleVideo(w, req)
+				return
 			default:
 				status = response.StatusOk
 				html = `<html>
@@ -159,4 +162,25 @@ func handleHTTPBin(w *response.Writer, req *request.Request) {
 
 	w.WriteChunkedBodyDone()
 	w.WriteTrailers(trailers)
+}
+
+func handleVideo(w *response.Writer, req *request.Request) {
+	// default video
+	video, err := os.ReadFile("assets/vim.mp4")
+
+	if err != nil {
+		log.Println("Error reading video file")
+		w.WriteStatusLine(response.StatusInternalServerError)
+		body := []byte("Error reading video file")
+		w.WriteHeaders(response.GetDefaultHeaders(len(body)))
+		w.WriteBody(body)
+		return
+	}
+
+	respHeaders := response.GetDefaultHeaders(len(video))
+	respHeaders["content-type"] = "video/mp4"
+
+	w.WriteStatusLine(response.StatusOk)
+	w.WriteHeaders(respHeaders)
+	w.WriteBody(video)
 }
